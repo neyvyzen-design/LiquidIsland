@@ -1,0 +1,16 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.liquid.island'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.liquid.island'
+        minSdk 23
+        targetSdk 32
+        versionCode 1
+        versionName '1.0'
+    }
+}
