@@ -1,26 +1,56 @@
 package com.liquid.island;
+import android.animation.*;
 
 import android.app.*;
 import android.os.*;
 import android.content.*;
-import android.graphics.Color;
-import android.graphics.PixelFormat;
-import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
+import android.graphics.*;
+import android.graphics.drawable.*;
 import android.view.*;
-import android.view.animation.DecelerateInterpolator;
+import android.view.animation.*;
 import android.widget.*;
-import android.animation.ValueAnimator;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 public class IslandService extends Service {
 
     WindowManager wm;
-    LinearLayout island;
-    LinearLayout content;
-    TextView title, subtitle;
-    boolean expanded = false;
-    int widthClosed, widthOpen;
-    int heightClosed = 48, heightOpen = 125;
+    FrameLayout root, panel;
+    LinearLayout compact, expanded, info;
+    TextView clock, battery, status, music, subtitle;
+    Handler handler = new Handler();
+    boolean open = false;
+    boolean charging = false;
+    int batteryLevel = 0;
+    int x = 0, y = 8;
+
+    int dp(float v) {
+        return (int)(v * getResources().getDisplayMetrics().density);
+    }
+
+    GradientDrawable shape(int radius) {
+        GradientDrawable g = new GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            new int[]{
+                Color.rgb(43,45,53),
+                Color.rgb(10,11,16),
+                Color.rgb(18,19,25)
+            }
+        );
+        g.setCornerRadius(dp(radius));
+        g.setStroke(dp(1), Color.argb(115,255,255,255));
+        return g;
+    }
+
+    TextView text(String value, int size, int color) {
+        TextView t = new TextView(this);
+        t.setText(value);
+        t.setTextSize(size);
+        t.setTextColor(color);
+        t.setGravity(Gravity.CENTER_VERTICAL);
+        return t;
+    }
 
     @Override
     public void onCreate() {
@@ -30,147 +60,272 @@ public class IslandService extends Service {
             (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
 
         if (Build.VERSION.SDK_INT >= 26) {
-            NotificationChannel channel = new NotificationChannel(
-                "island_service",
-                "Liquid Island",
+            NotificationChannel ch = new NotificationChannel(
+                "island_pro",
+                "Dynamic Island Pro",
                 NotificationManager.IMPORTANCE_LOW
             );
-            nm.createNotificationChannel(channel);
+            nm.createNotificationChannel(ch);
         }
 
-        Notification.Builder builder = new Notification.Builder(this);
-        if (Build.VERSION.SDK_INT >= 26)
-            builder.setChannelId("island_service");
+        Notification.Builder nb =
+            Build.VERSION.SDK_INT >= 26
+            ? new Notification.Builder(this,"island_pro")
+            : new Notification.Builder(this);
 
-        Notification notification = builder
-            .setContentTitle("Liquid Island")
-            .setContentText("Dynamic Island sedang aktif")
+        startForeground(1, nb
+            .setContentTitle("Dynamic Island Pro")
+            .setContentText("Island sedang aktif")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .build();
-
-        startForeground(1, notification);
+            .build());
 
         wm = (WindowManager)getSystemService(WINDOW_SERVICE);
 
-        widthClosed = dp(125);
-        widthOpen = dp(300);
+        registerReceiver(batteryReceiver,
+            new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
 
-        createIsland();
+        createUI();
+        updateClock();
     }
 
-    int dp(float value) {
-        return (int)(value * getResources().getDisplayMetrics().density);
-    }
+    BroadcastReceiver batteryReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            if (i == null) return;
+            batteryLevel = i.getIntExtra("level",0);
+            int plugged = i.getIntExtra("plugged",0);
+            charging = plugged != 0;
+            updateInfo();
+        }
+    };
 
-    GradientDrawable glass(int radius) {
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.rgb(25,27,34));
-        bg.setCornerRadius(dp(radius));
-        bg.setStroke(dp(1), Color.argb(95,255,255,255));
-        return bg;
-    }
+    void createUI() {
+        root = new FrameLayout(this);
+        root.setBackground(shape(32));
+        root.setElevation(dp(16));
 
-    void createIsland() {
-        island = new LinearLayout(this);
-        island.setOrientation(1);
-        island.setGravity(Gravity.CENTER);
-        island.setBackground(glass(35));
-        island.setElevation(dp(12));
+        GradientDrawable shine = new GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            new int[]{
+                Color.argb(35,255,255,255),
+                Color.argb(0,255,255,255)
+            }
+        );
+        shine.setCornerRadius(dp(32));
 
-        TextView dot = new TextView(this);
-        dot.setText("●");
-        dot.setTextColor(Color.rgb(0,220,255));
-        dot.setTextSize(13);
-        island.addView(dot);
+        View gloss = new View(this);
+        gloss.setBackground(shine);
+        root.addView(gloss,new FrameLayout.LayoutParams(
+            -1,dp(23),Gravity.TOP));
 
-        content = new LinearLayout(this);
-        content.setOrientation(1);
-        content.setPadding(dp(18),dp(12),dp(18),dp(12));
-        content.setVisibility(View.GONE);
+        compact = new LinearLayout(this);
+        compact.setGravity(Gravity.CENTER);
+        compact.setOrientation(LinearLayout.HORIZONTAL);
 
-        title = new TextView(this);
-        title.setText("Liquid Island");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(16);
-        title.setTypeface(null,Typeface.BOLD);
+        View dot = new View(this);
+        GradientDrawable led = new GradientDrawable();
+        led.setShape(GradientDrawable.OVAL);
+        led.setColor(Color.rgb(0,220,255));
+        dot.setBackground(led);
+        dot.setElevation(dp(5));
 
-        subtitle = new TextView(this);
-        subtitle.setText("System • Ready");
-        subtitle.setTextColor(Color.LTGRAY);
-        subtitle.setTextSize(12);
+        compact.addView(dot,new LinearLayout.LayoutParams(dp(7),dp(7)));
 
-        content.addView(title);
-        content.addView(subtitle);
-        island.addView(content);
+        TextView spacer = text("  ",10,Color.WHITE);
+        compact.addView(spacer);
+
+        clock = text("--:--",13,Color.WHITE);
+        compact.addView(clock);
+
+        View gap = new View(this);
+        compact.addView(gap,new LinearLayout.LayoutParams(dp(9),1));
+
+        battery = text("●",11,Color.GREEN);
+        compact.addView(battery);
+
+        root.addView(compact,new FrameLayout.LayoutParams(
+            -1,dp(43),Gravity.TOP));
+
+        expanded = new LinearLayout(this);
+        expanded.setOrientation(LinearLayout.VERTICAL);
+        expanded.setPadding(dp(17),dp(49),dp(17),dp(13));
+        expanded.setVisibility(View.GONE);
+
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView logo = text("◈  ISLAND PRO",13,Color.WHITE);
+        logo.setTypeface(null,1);
+        heading.addView(logo,new LinearLayout.LayoutParams(0,dp(30),1));
+
+        status = text("● ACTIVE",10,Color.rgb(80,230,160));
+        heading.addView(status);
+
+        expanded.addView(heading);
+
+        View line = new View(this);
+        line.setBackgroundColor(Color.argb(55,255,255,255));
+        LinearLayout.LayoutParams lp =
+            new LinearLayout.LayoutParams(-1,dp(1));
+        lp.topMargin=dp(8);
+        lp.bottomMargin=dp(9);
+        expanded.addView(line,lp);
+
+        music = text("♫  Dynamic Island",17,Color.WHITE);
+        music.setTypeface(null,1);
+        expanded.addView(music);
+
+        subtitle = text("Your Android • Premium Interface",11,
+            Color.LTGRAY);
+        LinearLayout.LayoutParams slp =
+            new LinearLayout.LayoutParams(-1,dp(25));
+        expanded.addView(subtitle,slp);
+
+        info = new LinearLayout(this);
+        info.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView batteryInfo = text("BATTERY",10,Color.GRAY);
+        info.addView(batteryInfo,new LinearLayout.LayoutParams(0,dp(25),1));
+
+        expanded.addView(info);
+        root.addView(expanded);
 
         WindowManager.LayoutParams params =
             new WindowManager.LayoutParams(
-                widthClosed,
-                dp(heightClosed),
+                dp(137),dp(43),
                 Build.VERSION.SDK_INT >= 26
-                    ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                    : WindowManager.LayoutParams.TYPE_PHONE,
+                ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                : WindowManager.LayoutParams.TYPE_PHONE,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                    | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT
             );
 
-        params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        params.y = dp(8);
+        params.gravity=Gravity.TOP|Gravity.CENTER_HORIZONTAL;
+        params.y=dp(y);
 
-        wm.addView(island,params);
+        wm.addView(root,params);
 
-        island.setOnClickListener(v -> toggleIsland());
+        root.setOnClickListener(v -> toggle());
+
+        root.setOnTouchListener(new View.OnTouchListener() {
+            float sx,sy;
+            int startX,startY;
+            boolean moved=false;
+
+            public boolean onTouch(View v, android.view.MotionEvent e) {
+                WindowManager.LayoutParams p =
+                    (WindowManager.LayoutParams)root.getLayoutParams();
+
+                switch(e.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        sx=e.getRawX();
+                        sy=e.getRawY();
+                        startX=p.x;
+                        startY=p.y;
+                        moved=false;
+                        return true;
+
+                    case MotionEvent.ACTION_MOVE:
+                        float dx=e.getRawX()-sx;
+                        float dy=e.getRawY()-sy;
+                        if(Math.abs(dx)>dp(5)||Math.abs(dy)>dp(5))
+                            moved=true;
+                        if(moved) {
+                            p.x=startX+(int)dx;
+                            p.y=startY+(int)dy;
+                            wm.updateViewLayout(root,p);
+                        }
+                        return true;
+
+                    case MotionEvent.ACTION_UP:
+                        if(!moved) toggle();
+                        return true;
+                }
+                return true;
+            }
+        });
     }
 
-    void toggleIsland() {
-        expanded = !expanded;
-
-        content.setVisibility(expanded ? View.VISIBLE : View.GONE);
-
-        title.setText(expanded ? "Liquid Island" : "");
-        subtitle.setText(expanded
-            ? "Dynamic system • Running"
-            : "");
+    void toggle() {
+        open=!open;
+        expanded.setVisibility(View.VISIBLE);
 
         WindowManager.LayoutParams p =
-            (WindowManager.LayoutParams)island.getLayoutParams();
+            (WindowManager.LayoutParams)root.getLayoutParams();
 
-        int startW = p.width;
-        int startH = p.height;
-        int endW = expanded ? widthOpen : widthClosed;
-        int endH = dp(expanded ? heightOpen : heightClosed);
+        int startW=p.width;
+        int startH=p.height;
+        int endW=dp(open?315:137);
+        int endH=dp(open?177:43);
 
-        ValueAnimator anim = ValueAnimator.ofFloat(0f,1f);
-        anim.setDuration(380);
-        anim.setInterpolator(new DecelerateInterpolator());
+        ValueAnimator a=ValueAnimator.ofFloat(0,1);
+        a.setDuration(420);
+        a.setInterpolator(new OvershootInterpolator(0.8f));
 
-        anim.addUpdateListener(a -> {
-            float f = (float)a.getAnimatedValue();
-            p.width = (int)(startW + (endW-startW)*f);
-            p.height = (int)(startH + (endH-startH)*f);
-            wm.updateViewLayout(island,p);
+        a.addUpdateListener(v -> {
+            float f=(float)v.getAnimatedValue();
+            p.width=(int)(startW+(endW-startW)*f);
+            p.height=(int)(startH+(endH-startH)*f);
+            wm.updateViewLayout(root,p);
         });
 
-        anim.start();
+        a.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if(!open) expanded.setVisibility(View.GONE);
+            }
+        });
+        a.start();
+
+        compact.setAlpha(open?0.2f:1f);
+        expanded.animate().alpha(open?1f:0f).setDuration(180).start();
     }
 
-    @Override
-    public int onStartCommand(Intent intent,int flags,int id) {
-        return START_STICKY;
+    void updateInfo() {
+        if(battery==null) return;
+        battery.setText(charging?"⚡":batteryLevel+"%");
+        battery.setTextColor(charging
+            ? Color.rgb(80,230,150)
+            : Color.WHITE);
+        if(music!=null)
+            music.setText(charging
+                ? "⚡  Charging"
+                : "♫  Dynamic Island");
+        if(subtitle!=null)
+            subtitle.setText(charging
+                ? "Power connected • "+batteryLevel+"%"
+                : "Battery level • "+batteryLevel+"%");
+    }
+
+    void updateClock() {
+        if(clock!=null) {
+            clock.setText(new SimpleDateFormat(
+                "HH:mm",Locale.getDefault()).format(new Date()));
+        }
+        handler.postDelayed(this::updateClock,1000);
     }
 
     @Override
     public void onDestroy() {
-        if (wm != null && island != null) {
-            try { wm.removeView(island); }
-            catch (Exception ignored) {}
+        handler.removeCallbacksAndMessages(null);
+        try { unregisterReceiver(batteryReceiver); }
+        catch(Exception ignored) {}
+        if(wm!=null&&root!=null) {
+            try { wm.removeView(root); }
+            catch(Exception ignored) {}
         }
         super.onDestroy();
     }
 
     @Override
-    public IBinder onBind(Intent intent) {
+    public int onStartCommand(Intent i,int f,int id) {
+        return START_STICKY;
+    }
+
+    @Override
+    public IBinder onBind(Intent i) {
         return null;
     }
 }
